@@ -39,13 +39,15 @@ function pss_setup_menu(){
                         $menu_slug='pss-options',
                         $function='pss_init' );
 }
+        $pss_stale_age=2*365*24*3600;
 
 
 
 function pss_init()
 {
-// pss_purge_site(8);
- pss_main();
+//pss_remove_options();
+//	pss_main();
+pss_notify_users(220);
 }
 
 
@@ -59,6 +61,7 @@ function pss_remove_options(){
 	}
 
 }
+
 function pss_main(){
 	global $wpdb;
 
@@ -71,7 +74,6 @@ function pss_main(){
 	$pss_stale_age=2*365*24*3600;
 	$pss_warn_interval=10;
 	$all_sites=get_sites(array("number"=>100));
-	//print_r($all_sites);
 
 	print("<table><tr><th>blog_id</th><th>blog_name</th><th>last_modified</th><th>flag</th></tr>");
 
@@ -197,9 +199,36 @@ function pss_notify_users($blog_id)
 			$log_message.=$admin->data->user_email.",";
 	}
 
-
+	$sites=get_sites(array("ID"=>get_current_blog_id()));
+	$this_site=$sites[0];
 
 	pss_log("blog_id: ".$blog_id."\tStatus: ".$pss_status[flag]."\tOwner: ".$owner_email."  admins: ".$log_message);	
+
+	
+	$headers[] = "From: sites.tufts.edu cleanup robot <noreply@tufts.edu>";
+        $headers[] = "Content-Type: text/html; charset=UTF-8";
+        $to="ian.altgilbers@tufts.edu";
+        $subject="Inactive WordPress Site (Action requested)";
+        $message="<!DOCTYPE html>
+<html>
+<head></head>
+<body>
+<h2>Inactive WordPress Site</h2>
+<p>You are receiving this email because you are an administrator or site owner of the following site:</p>
+<p><a href=\"##BLOG_URL##\">##BLOG_URL##</a></p>
+<p>According to our records, this site has not been updated since ##BLOG_LASTUPDATE##.  This site will soon be disabled and then deleted if no action is taken.</p>
+<p>If this site is no longer needed you can delete it yourself here:</p>
+<p><a href=\"##BLOG_URL##wp-admin/ms-delete-site.php\">##BLOG_URL##wp-admin/ms-delete-site.php</a></p>
+<p>If you would like to keep this site, please login and take action (simply resaving an existing page/post is sufficient)</p>
+</body>
+</html>";
+      
+$message=preg_replace('/##BLOG_URL##/',"https://".$this_site->domain.$this_site->path,$message);  
+$message=preg_replace('/##BLOG_LASTUPDATE##/',$this_site->last_updated,$message);  
+        
+        wp_mail($to,$subject,$message,$headers);
+
+
 
 }
 
@@ -222,15 +251,48 @@ function pss_purge_site($blog_id)
 	}
 	error_log(implode(',',$email_to));
 	$headers[] = "From: sites.tufts.edu cleanup robot <noreply@tufts.edu>";
+	$headers[] = "Content-Type: text/html; charset=UTF-8";
 	$to="ian.altgilbers@tufts.edu";
 	$subject="This is a test";
-	$message="You can ignore this email if you aren't Ian... Ready to delete blog: ".$blog_id;
-	wp_mail($to,$subject,$message,$headers);
+//	$message="You can ignore this email if you aren't Ian... Ready to delete blog: ".$blog_id;
+        $message="<!DOCTYPE html>
+<html>
+<head>
+<title>Title of the document</title>
+</head>
 
+<body>
+<h1>Attention required:</h1>
+<p>The content of the document......<p>
+
+<table>
+<tr><td>boo</td><td>hoo</td></tr>
+</table>
+</body>
+
+</html>";
+
+
+	wp_mail($to,$subject,$message,$headers);
 
 	wpmu_delete_blog($blog_id,true);
 }
 
 
 
+
+function pss_admin_notice_error() {
+	$blog_id = get_current_blog_id();
+	$sites=get_sites(array("ID"=>get_current_blog_id()));
+
+	$class = 'notice notice-error';
+	$message ="This site hasn't been updated since ".$sites[0]->last_updated.".  If you would like to keep this site active, please make an edit somewhere to keep this site from going stale.";
+	$pss_status=get_option('pss_status');
+	global $pss_stale_age;	
+	if((time()-strtotime($sites[0]->last_updated))>$pss_stale_age)
+		printf( '<div class="%1$s"><p>%2$s</p></div>', $class, $message ); 
+}
+add_action( 'admin_notices', 'pss_admin_notice_error' );
+
+// wpmu_blog_updated - action to consider to clear flag proactively
 ?>
