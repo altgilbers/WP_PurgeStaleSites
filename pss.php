@@ -381,5 +381,37 @@ add_action( 'admin_notices', 'pss_admin_notice' );
 // wpmu_blog_updated - action to consider to clear flag proactively
 
 
+// show status of a blog in the network admin sites page:
 
+add_filter('wpmu_blogs_columns','pss_add_blog_status_column');
+function pss_add_blog_status_column($columns)
+{
+    $columns['pss_status'] = 'PSS Status';
+    
+    return $columns;
+}
+add_action('manage_sites_custom_column','pss_populate_blog_status_column',10,2);
+function pss_populate_blog_status_column($col_name,$blog_id)
+{
+	if($col_name=='pss_status')
+	{
+	        switch_to_blog($blog_id);
+		$pss_status=get_option('pss_status');
+		switch ($pss_status[flag])
+		{
+			case 0: $message="active";break;
+			case 1: $message="warned";break;
+			case 2: $message="warned2";break;
+			case 3: $message="archived";break;
+			case 4: $message="deleted";break;
+			case 5: $message="ready_to_purge";break;
+			default: $message="no status";
+		}
+		if(empty($pss_status))
+			echo "no status";
+		else
+		//	echo "<p>$message ".date("Y-m-d H:i:s",$pss_status[timestamp])."</p>";
+			echo "<p>$message</p>";
+	}
+}
 ?>
