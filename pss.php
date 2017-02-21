@@ -100,6 +100,12 @@ function pss_admin_init()
 			$callback='pss_warn_interval_cb',
 			$page='pss-options',
 			$section='pss_options');
+	add_settings_field($id='pss_cron_enable',
+			$title='Enable cron task',
+			$callback='pss_cron_enable_cb',
+			$page='pss-options',
+			$section='pss_options');
+
 }
 
 
@@ -110,6 +116,65 @@ function pss_warn_interval_cb(){
 	echo "<input type='text' name='pss_warn_interval' value='".get_site_option('pss_warn_interval')."'/>";
 }
 
+function pss_cron_enable_cb(){
+	echo "<input type='checkbox' name='pss_cron_enable' ";
+	if(get_site_option('pss_cron_enable')=="true")
+		echo "checked";
+	echo ">";
+}
+
+// this action runs when /wp-admin/network/edit.php is called with ?action=pss-options
+// could use some validation...
+add_action('network_admin_edit_pss-options', 'pss_save_network_options');
+function pss_save_network_options(){
+	
+	$redirect_query_string_array=array( 'page' => 'pss-options');
+        $error_msg="";
+	// superadmins shouldn't ever see this, but if somehow they do, bail...
+	if(!is_super_admin()){
+		exit;
+	}
+	pss_log("Saving network options...");
+	if(isset($_POST["pss_stale_age"])){
+		update_site_option("pss_stale_age",$_POST["pss_stale_age"]);
+	}
+	if(isset($_POST["pss_warn_interval"])){
+		update_site_option("pss_warn_interval",$_POST["pss_warn_interval"]);
+	}
+	if(isset($_POST["pss_cron_enable"])){
+		sync_log("pss_cron_enable=".$_POST["pss_cron_enable"]);
+                update_site_option("pss_cron_enable","true");
+	        if (wp_next_scheduled ( 'pss_sync_event' )) {
+                	wp_clear_scheduled_hook('pss_sync_event');
+                }
+		wp_schedule_event(time(), 'hourly', 'pss_sync_event');
+	}
+	else
+	{
+		update_site_option("pss_cron_enable","false");
+		wp_clear_scheduled_hook('pss_sync_event');
+	}
+	
+
+	if(false){
+		$redirect_query_string_array['error']=urlencode(ldap_error($L));
+	}
+	$redirect_url=add_query_arg($redirect_query_string_array,
+        (is_multisite() ? network_admin_url( 'admin.php' ) : admin_url( 'admin.php' ))
+	);
+	sync_log("redirecting to: ".$redirect_url);
+	wp_redirect($redirect_url);
+	
+	//must exit, otherwise another redirect will trump the one we set here.
+	exit;
+}
+
+// define action that is called by wp-cron
+add_action('pss_sync_event', 'pss_process1');
+function pss_process1()
+{
+ pss_log("running cron");
+}
 
 
 register_activation_hook( __FILE__, 'pss_activate' );
@@ -149,16 +214,13 @@ function pss_process(){
 
 	foreach($all_sites as $site)
 	{
-		//pss_notify_users($site->blog_id);		
 		switch_to_blog($site->blog_id);
-
 		$pss_status=get_option('pss_status');
 		if ($pss_status==false)  //initialize if it is not set..
 		{
 			$pss_status=array("flag"=>0,"timestamp"=>time());
 			update_option('pss_status',$pss_status);
 		}
-
 
 		// if blog is stale, let's process it
                 if((time()-strtotime($site->last_updated))>$pss_stale_age)
@@ -217,7 +279,7 @@ function pss_process(){
 					}
 				break;
 				case 4:
-					//noting to do here... just a place holder for a state that currently requires no action
+					//noting to do here... just a place holder for a state that currently requires no action..   This is handled by a shell script
 				break;
 				case 5:  // once the external script archives the attachments, dumps the tables, and updates the flag to 5, then we can actually purge the site from 
 					pss_purge_site($site->blog_id);
