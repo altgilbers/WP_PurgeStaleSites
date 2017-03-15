@@ -12,7 +12,7 @@
 
 	After your set interval, warn again.
 	After another interval, mark site as deactivated
-	After another interval, archive site and delete it
+	After twice the interval, archive site and delete it
 
   pss_status flag values
   0 - initialized, site active
@@ -24,8 +24,10 @@
 */
 
 
-add_action('network_admin_menu','pss_setup_menu');
+// this require is necessary for wpmu_delete_blog() to work from cron
+require_once( ABSPATH . 'wp-admin/includes/admin.php' );
 
+add_action('network_admin_menu','pss_setup_menu');
 function pss_setup_menu(){
         add_menu_page( $page_title='PSS Plugin Page',
                         $menu_title='PSS Options',
@@ -37,9 +39,7 @@ function pss_setup_menu(){
 
 function pss_admin_page()
 {
-
-echo "<h3>Purge Stale Sites</h3>";
-
+	echo "<h3>Purge Stale Sites</h3>";
 
 	if(isset($_GET['pss_reset']))
 	{
@@ -101,8 +101,7 @@ function pss_admin_init()
 }
 
 
-function pss_stale_age_cb(){
-	
+function pss_stale_age_cb(){	
 	echo "<input type='text' name='pss_stale_age' value='".(get_site_option('pss_stale_age')/86400)."'/>";
 }
 function pss_warn_interval_cb(){
@@ -149,7 +148,6 @@ function pss_save_network_options(){
 		wp_clear_scheduled_hook('pss_sync_event');
 	}
 
-	
 	$redirect_url=add_query_arg($redirect_query_string_array,(is_multisite() ? network_admin_url( 'admin.php' ) : admin_url( 'admin.php' )));
 	pss_log("redirecting to: ".$redirect_url);
 	wp_redirect($redirect_url);
@@ -195,7 +193,7 @@ function pss_process(){
 	$pss_warn_interval=get_site_option('pss_warn_interval');
 
 	// probably need to break this up into smaller chunks somehow..
-	$all_sites=get_sites(array("number"=>500));
+	$all_sites=get_sites(array("number"=>50000));
 	
 	pss_log("--------------------------------------------------------------------------------");
 	pss_log("processing ".count($all_sites)." blogs, with stale age of: ".$pss_stale_age." and warn interval of: ".$pss_warn_interval);
@@ -205,17 +203,32 @@ function pss_process(){
 		switch_to_blog($site->blog_id);
 		$pss_status=get_option('pss_status');
 		
-		if ($site->deleted==1 && ($pss_status==false || $pss_status[flag]<=2))
+		if ($site->deleted==1)
 		{
-			pss_log("This site has been marked for deletion by a user..".$site->blog_id." - ".$site->path);
-			// mark archived and update pss_status to 4 so the archiving script can handle this one
-			$pss_status=array("flag"=>4,"timestamp"=>time());
-			update_option('pss_status',$pss_status);
-			update_blog_status($site->blog_id,'archived',1);
-			// we have to re-set the last_updated field, otherwise this makes the blog look like it has had activity
-			$wpdb->update('wp_blogs', array('last_updated'=>$site->last_updated),array('blog_id'=>$site->blog_id));
+			if($pss_status==false || $pss_status[flag]<=2)
+			{
+				pss_log("This site has been marked for deletion by a user..".$site->blog_id." - ".$site->path);
+				$pss_status=array("flag"=>4,"timestamp"=>time());   // mark archived and update pss_status to 4 so the archiving script can handle this one
+				update_option('pss_status',$pss_status);
+				update_blog_status($site->blog_id,'archived',1);
+				// we have to re-set the last_updated field, otherwise this makes the blog look like it has had activity
+				$wpdb->update('wp_blogs', array('last_updated'=>$site->last_updated),array('blog_id'=>$site->blog_id));
+			}
+                        else if ($pss_status[flag]==4)
+                        {
+				// nothing to do...  waiting on external archive to mark for purging
+			}
+			else if ($pss_status[flag]==5)
+			{
+				// has been archived and ready to purge
+				pss_purge_site($site->blog_id);
+			}
+			else  // shouldn't get here 
+			{
+				pss_log($site->blog_id." marked deleted, but unexpected pss_status: ".$pss_status[flag]);
+			}			
 			restore_current_blog();
-			continue;
+			continue;  // skip the rest for this site..
 		}
 
 		if ($pss_status==false)  //initialize if it is not set..
@@ -224,7 +237,9 @@ function pss_process(){
 			update_option('pss_status',$pss_status);
 		}
 
-                if((time()-strtotime($site->last_updated))>$pss_stale_age)    // if blog is stale, let's process it
+		$staleness=time()-strtotime($site->last_updated);
+		$since_last_warning=time()-$pss_status[timestamp]; 
+               if($staleness>$pss_stale_age)    // if blog is stale, let's process it
 		{
 			switch ($pss_status[flag])
 			{
@@ -237,7 +252,7 @@ function pss_process(){
 						pss_log("unable to update option: pss_status for blog:".$site->blog_id);
 				break;
 				case 1:  //  already warned once, lets warn again if enough time elapsed
-					if((time()-$pss_status[timestamp])>$pss_warn_interval)
+					if($since_last_warning>$pss_warn_interval)
 					{
 						$pss_status[timestamp]=time();
 						$pss_status[flag]++;
@@ -245,10 +260,10 @@ function pss_process(){
                                                 pss_notify_users($site->blog_id);
                                         else
                                                 pss_log("unable to update option: pss_status for blog:".$site->blog_id);
-}
+					}
 				break;
 				case 2:  //  warned twice, now we "archive" to take site offline, if enough time elapsed
-					if((time()-$pss_status[timestamp])>$pss_warn_interval)
+					if($since_last_warning>$pss_warn_interval)
 					{   
 						$pss_status[timestamp]=time();
 						$pss_status[flag]++;
@@ -264,7 +279,7 @@ function pss_process(){
 					}   
 				break;
 				case 3:  // "archived" site..  now we mark it as deleted  so an external script or manual process an make a copy and then purge the site.
-					if((time()-$pss_status[timestamp])>$pss_warn_interval*2)
+					if($since_last_warning>$pss_warn_interval*2)
 					{
 						$pss_status[timestamp]=time();
                                                 $pss_status[flag]++;
@@ -280,11 +295,8 @@ function pss_process(){
 
 					}
 				break;
-				case 4:
-					//noting to do here... just a place holder for a state that currently requires no action..   This is handled by a shell script
-				break;
-				case 5:  // once the external script archives the attachments, dumps the tables, and updates the flag to 5, then we can actually purge the site from 
-					pss_purge_site($site->blog_id);
+				case 4:  	//noting to do here... just a place holder for a state that currently requires no action..   This is handled by a shell script
+				case 5:         // shouldn't get here... should be caught earlier
 				break;
 				default:  // Shouldn't get here... just throw an error.
 					pss_log("Unexpected value flag=".$pss_status[flag]." for: ".$site->blog_id);
@@ -311,6 +323,10 @@ function pss_process(){
 //
 function pss_notify_users($blog_id)
 {
+        global $wpdb;
+        $sites=get_sites(array("ID"=>$blog_id));
+        $site=$sites[0];
+
 	switch_to_blog($blog_id);
 
         $pss_status=get_option('pss_status');
@@ -344,23 +360,33 @@ function pss_notify_users($blog_id)
 		pss_log("adding ".$owner_email." to recipients for ".$blog_id."...  email not associated with WP account");
 	}
 
-	if(count($recipients)==0)
+	if(count($recipients)==0 && $pss_status[flag]<3)
 	{
-		$subject="No reachable users for ".$blog_id;
+		//if there are no reachable users, we can shortcut the process and go straight to archived
+		$pss_status[timestamp]=time();
+		$pss_status[flag]=3;
+		if(!update_option('pss_status',$pss_status))
+			pss_log("unable to update option: pss_status for blog:".$site->blog_id);
+
+		// this takes the blog off-line, and users will see a "blog unavailable message" 
+		update_blog_status($site->blog_id,'archived',1);
+		// we have to re-set the last_updated field, otherwise this makes the blog look like it has had activity
+		$wpdb->update('wp_blogs', array('last_updated'=>$site->last_updated),array('blog_id'=>$site->blog_id));
+
+		// notify about 
+		$subject="No reachable users for ".$site->path." (id:".$site->blog_id.")";
 		pss_log($subject);
 		$message=$subject;
 		$to="sites.tufts.edu@elist.tufts.edu";
 		wp_mail($to,$subject,$message,$headers);
 		restore_current_blog();
-		return;
+		return;  // nothing more to do for this blog
 	}
 
-	$sites=get_sites(array("ID"=>$blog_id));
-	$this_site=$sites[0];
 
-	pss_log("Notifying: blog_id: ".$blog_id."\tStatus: ".$pss_status[flag]."\tpath: ".$this_site->path."\tStatus: ".$pss_status[flag]."\tOwner: ".$owner_email."  admins: [".implode(',',$recipients)."]");	
+	pss_log("Notifying: blog_id: ".$blog_id."\tStatus: ".$pss_status[flag]."\tpath: ".$site->path."\tStatus: ".$pss_status[flag]."\tOwner: ".$owner_email."  admins: [".implode(',',$recipients)."]");	
 	
-	$headers[] = "From: ".$this_site->domain." cleanup robot <noreply@tufts.edu>";
+	$headers[] = "From: ".$site->domain." cleanup robot <noreply@tufts.edu>";
         $headers[] = "Content-Type: text/html; charset=UTF-8";
         $headers[] = "Reply-To: edtech@tufts.edu";
 	$headers[] = "Bcc: sites.tufts.edu@elist.tufts.edu";
@@ -396,18 +422,18 @@ function pss_notify_users($blog_id)
 			$subject="Inactive WordPress Site (Final Notice)";
 			break;
 		default: 
-			pss_log("we don't send notifications for this flag level");
+			pss_log("we don't send notifications for this flag level: ".$pss_status[flag]." site:".$site->path." id: ".$site->blog_id);
 			return;
 	}
 
 	$pss_dates=pss_get_archive_delete_dates($blog_id);
 	$message=preg_replace('/##BLOG_ARCHIVEDATE##/',date("Y-m-d",$pss_dates[archive_date]),$message);  
 	$message=preg_replace('/##BLOG_DELETEDATE##/',date("Y-m-d",$pss_dates[delete_date]),$message);  
-        $message=preg_replace('/##BLOG_URL##/',"https://".$this_site->domain.$this_site->path,$message);
-        $message=preg_replace('/##BLOG_LASTUPDATE##/',$this_site->last_updated,$message);
-        $message=preg_replace('/##BLOG_DOMAIN##/',$this_site->domain,$message);
+        $message=preg_replace('/##BLOG_URL##/',"https://".$site->domain.$site->path,$message);
+        $message=preg_replace('/##BLOG_LASTUPDATE##/',$site->last_updated,$message);
+        $message=preg_replace('/##BLOG_DOMAIN##/',$site->domain,$message);
 
- 	if($this_site->domain!=="sites-stage.tufts.edu")
+ 	if($site->domain!=="sites-stage.tufts.edu")
 		wp_mail($to,$subject,$message,$headers);
 	restore_current_blog();   // always restore after switch_to_blog()
 }
@@ -447,22 +473,26 @@ function pss_log($msg)
 // actual deletion of site..   Logs deletion and sends email.
 function pss_purge_site($blog_id)
 {
-	$email_to=array();
-	$admins=get_super_admins();
-	foreach($admins as $admin)
-	{
-		$user=get_user_by('login',$admin);
-		array_push($email_to,$user->user_email);
-	}
-	error_log(implode(',',$email_to));
+	//$email_to=array();
+	//$admins=get_super_admins();
+	//foreach($admins as $admin)
+	//{
+	//	$user=get_user_by('login',$admin);
+	//	array_push($email_to,$user->user_email);
+	//}
+
+        $sites=get_sites(array("ID"=>$blog_id));
+        $site=$sites[0];
+
 	$headers[] = "From: sites.tufts.edu cleanup robot <noreply@tufts.edu>";
 	$to="sites.tufts.edu@elist.tufts.edu";
-	$subject="Site purged: blog: ".$blog_id." path: ".$site->path;
+	$subject="Site purged: blog: ".$site->blog_id." path: ".$site->path;
         $message=$subject;
 
 	wp_mail($to,$subject,$message,$headers);
 	pss_log($message);
 	wpmu_delete_blog($blog_id,true);
+	pss_log("deletion complete for ".$site->path." id: ".$site->blog_id );
 }
 
 
