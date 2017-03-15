@@ -139,7 +139,7 @@ function pss_save_network_options(){
 	        if (wp_next_scheduled ( 'pss_sync_event' )) {
                 	wp_clear_scheduled_hook('pss_sync_event');
                 }
-		wp_schedule_event(time(), 'hourly', 'pss_sync_event');
+		wp_schedule_event(time(), 'twicedaily', 'pss_sync_event');
 	}
 	else
 	{
@@ -373,7 +373,7 @@ function pss_notify_users($blog_id)
 		// we have to re-set the last_updated field, otherwise this makes the blog look like it has had activity
 		$wpdb->update('wp_blogs', array('last_updated'=>$site->last_updated),array('blog_id'=>$site->blog_id));
 
-		// notify about 
+		// notify admininstator about this for review 
 		$subject="No reachable users for ".$site->path." (id:".$site->blog_id.")";
 		pss_log($subject);
 		$message=$subject;
@@ -386,11 +386,11 @@ function pss_notify_users($blog_id)
 
 	pss_log("Notifying: blog_id: ".$blog_id."\tStatus: ".$pss_status[flag]."\tpath: ".$site->path."\tStatus: ".$pss_status[flag]."\tOwner: ".$owner_email."  admins: [".implode(',',$recipients)."]");	
 	
-	$headers[] = "From: ".$site->domain." cleanup robot <noreply@tufts.edu>";
+	$headers[] = "From: ".$site->domain." cleanup robot <sites.tufts.edu@elist.tufts.edu>";
         $headers[] = "Content-Type: text/html; charset=UTF-8";
         $headers[] = "Reply-To: edtech@tufts.edu";
 	$headers[] = "Bcc: sites.tufts.edu@elist.tufts.edu";
-	$to="sites.tufts.edu@elist.tufts.edu";
+	$to=$recipients;
         $subject="Inactive WordPress Site (Action requested)";
         $message="<!DOCTYPE html>
 <html>
@@ -512,6 +512,7 @@ function pss_admin_notice() {
 	// if we're halfway-to-stale or more, we'll put a warning on the blog's admin page.
 	if((time()-strtotime($site->last_updated))>$pss_stale_age/2)
 	{
+		// if we're past stale age, upgrade to error (red) and give dates of impending deletion
 	        if((time()-strtotime($site->last_updated))>$pss_stale_age)
 		{
 			$message="<h3>Action required</h3>".$message;
@@ -541,6 +542,7 @@ function pss_add_blog_status_column($columns)
     
     return $columns;
 }
+
 // populate status column in network admin sites page
 add_action('manage_sites_custom_column','pss_populate_blog_status_column',10,2);
 function pss_populate_blog_status_column($col_name,$blog_id)
