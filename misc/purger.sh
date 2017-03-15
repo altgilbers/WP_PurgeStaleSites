@@ -1,12 +1,22 @@
 #!/bin/bash
 
+# this script goes through all sites in the wordpress database and checks to see if they need
+# to be archived (checks pss_status in each blogs wp_xxx_options table, then it mysqldumps and tars
+#
 
+# db password
 mysql_pass=
+# db userame
 mysql_user=
+# db hostname
 mysql_host=
+# db name
 mysql_DB=
+# desination dir to save archives in
 archive_dir=
+# wordpress root directory
 wordpress_dir=
+# email address to notify of failures
 notify_email=
 
 
