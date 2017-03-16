@@ -41,6 +41,7 @@ function pss_admin_page()
 {
 	echo "<h3>Purge Stale Sites</h3>";
 
+	//  add pss_reset to query string to reset plugin settings
 	if(isset($_GET['pss_reset']))
 	{
 		pss_deactivation_hook();
@@ -422,7 +423,7 @@ function pss_notify_users($blog_id)
 			$subject="Inactive WordPress Site (Final Notice)";
 			break;
 		default: 
-			pss_log("we don't send notifications for this flag level: ".$pss_status[flag]." site:".$site->path." id: ".$site->blog_id);
+			pss_log("we don't send notifications for this flag level: ".$pss_status[flag]." site:".$site->path." id: ".$blog_id);
 			return;
 	}
 
