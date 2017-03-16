@@ -450,7 +450,8 @@ function pss_get_archive_delete_dates($blog_id)
 	        $pss_delete_date=$pss_status[timestamp]+$pss_warn_interval*(5-$flag);
 	}
 	else {
-        	pss_log("we don't send notifications for this flag level");
+        	// this function gets called by any admin page, so we don't wanna log this every time...
+		//pss_log("we don't send notifications for this flag level");
         	return false;
 	}
 	return array("archive_date"=>$pss_archive_date,"delete_date"=>$pss_delete_date);
