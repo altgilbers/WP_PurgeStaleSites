@@ -69,10 +69,11 @@ function pss_admin_page()
 add_action('admin_init','pss_admin_init');
 function pss_admin_init()
 {
-	if ( ! is_super_admin() ) {
-		wp_redirect( site_url() ); 
-		exit;
-	}
+	# this was intended to prevent this from showing up for non-admins, but instead blocks out the entire wp-admin area..
+	//if ( ! is_super_admin() ) {
+	//	wp_redirect( site_url() ); 
+	//	exit;
+	//}
 	
 	 add_settings_section($id='pss_options',
                         $title='PSS Options',
