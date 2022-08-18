@@ -412,16 +412,18 @@ function pss_notify_users($blog_id)
 	if (is_readable(__DIR__."/email_template/warn.html"))
 		$message=file_get_contents(__DIR__."/email_template/warn.html");
 
+	$blogname = get_option('blogname');
+
 	switch($pss_status[flag])
 	{
 		case 1: 
-			$subject="Inactive WordPress Site (Action requested)";
+			$subject="Your ".$site->domain." site (".$blogname.") needs attention (This is not spam)";
 			break;
         	case 2: 
-			$subject="Inactive WordPress Site (Second warning)";
+			$subject="Your ".$site->domain." site (".$blogname.") needs attention (Second Warning)";
 			break;
         	case 3: 
-			$subject="Inactive WordPress Site (Final Notice)";
+			$subject="Your ".$site->domain." site (".$blogname.") needs attention (FINAL WARNING)";
 			break;
 		default: 
 			pss_log("we don't send notifications for this flag level: ".$pss_status[flag]." site:".$site->path." id: ".$blog_id);
@@ -434,6 +436,7 @@ function pss_notify_users($blog_id)
         $message=preg_replace('/##BLOG_URL##/',"https://".$site->domain.$site->path,$message);
         $message=preg_replace('/##BLOG_LASTUPDATE##/',$site->last_updated,$message);
         $message=preg_replace('/##BLOG_DOMAIN##/',$site->domain,$message);
+        $message=preg_replace('/##BLOG_NAME##/',$blogname,$message);
 
        if($site->domain=="sites.tufts.edu")
 		wp_mail($to,$subject,$message,$headers);
