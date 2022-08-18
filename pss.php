@@ -435,7 +435,7 @@ function pss_notify_users($blog_id)
         $message=preg_replace('/##BLOG_LASTUPDATE##/',$site->last_updated,$message);
         $message=preg_replace('/##BLOG_DOMAIN##/',$site->domain,$message);
 
- 	if($site->domain!=="sites-stage.tufts.edu")
+       if($site->domain=="sites.tufts.edu")
 		wp_mail($to,$subject,$message,$headers);
 	restore_current_blog();   // always restore after switch_to_blog()
 }
